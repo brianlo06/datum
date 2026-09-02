@@ -1,0 +1,81 @@
+name: datum
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-datum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-datum}
+      POSTGRES_DB: ${POSTGRES_DB:-datum}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks: [edge]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-datum} -d ${POSTGRES_DB:-datum}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # The build sandbox. Every submission is treated as hostile code, so this
+  # service gets: no network egress (the `sandbox` network is internal), an
+  # unprivileged user, a read-only root filesystem with a tmpfs for scratch,
+  # no ability to gain privileges, and hard memory/CPU/PID ceilings. The
+  # per-build wall-clock timeout is enforced inside the process as well.
+  builder:
+    build:
+      context: .
+      dockerfile: services/builder/Dockerfile
+    environment:
+      BUILDER_PORT: "8081"
+      BUILD_TIMEOUT_MS: ${BUILD_TIMEOUT_MS:-30000}
+      BUILD_CONCURRENCY: ${BUILD_CONCURRENCY:-2}
+    networks: [sandbox]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,exec,size=512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "2.0"
+          pids: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-datum}:${POSTGRES_PASSWORD:-datum}@db:5432/${POSTGRES_DB:-datum}
+      BUILDER_URL: http://builder:8081
+      API_PORT: "8080"
+      ARTIFACT_DIR: /var/datum/artifacts
+    ports:
+      - "8080:8080"
+    volumes:
+      - artifacts:/var/datum/artifacts
+    networks: [edge, sandbox]
+    depends_on:
+      db:
+        condition: service_healthy
+      builder:
+        condition: service_healthy
+
+networks:
+  edge:
+  sandbox:
+    internal: true
+
+volumes:
+  db-data:
+  artifacts:
