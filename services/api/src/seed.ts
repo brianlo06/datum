@@ -29,6 +29,8 @@ const INTERFACES: [slug: string, name: string, description: string][] = [
   ["fastener/m3-clearance", "M3 clearance hole", "3.2-3.4mm through hole for an M3 bolt."],
   ["fastener/m4-clearance", "M4 clearance hole", "4.3mm through hole for an M4 bolt."],
   ["fastener/m5-clearance", "M5 clearance hole", "5.3mm through hole for an M5 bolt."],
+  ["fastener/m6-clearance", "M6 clearance hole", "6.4mm through hole for an M6 bolt."],
+  ["fastener/m8-clearance", "M8 clearance hole", "8.4mm through hole for an M8 bolt."],
   ["fastener/m3-heatset", "M3 heat-set insert", "Standard 4.0mm x 5.0mm brass heat-set insert pocket."],
   ["fastener/m3-hexnut", "M3 hex nut pocket", "5.5mm across flats, 2.4mm deep."],
   ["mount/vesa-75", "VESA 75", "75x75mm M4 mounting pattern."],

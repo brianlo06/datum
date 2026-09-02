@@ -18,14 +18,17 @@ build the thing that lets them.
 
 | Piece | Status |
 |---|---|
-| Customizer schema parser (`@datum/scad-schema`) | Working, 40 tests |
+| Customizer schema parser (`@datum/scad-schema`) | Working, 55 tests |
 | Parameter validation and safe `-D` serialization | Working |
 | Sandboxed OpenSCAD build service | Working, isolated |
 | STL parsing + geometry measurement | Working, 30 tests |
 | Plain-language build diagnostics | Working |
 | Registry API (parts, builds, cache, fit search, made reports) | Working |
 | Configurator UI with live 3D preview | Working |
-| Publish flow, forking, revision requests, accounts | **Not built** |
+| Publish flow with a readiness gate | Working, 15 tests |
+| Fit-based semver with automatic bump proposal | Working, 20 tests |
+| Minimal handle ownership (token, not accounts) | Working |
+| Forking, revision requests, geometric diff UI | **Not built** |
 
 ## Quick start
 
@@ -36,6 +39,8 @@ npm install
 npm run -w @datum/api seed    # interface vocabulary + seed parts
 npm run dev:web               # http://localhost:5173
 ```
+
+Then open <http://localhost:5173/publish> and paste some OpenSCAD.
 
 The web app proxies `/api` to port 8080. Postgres is published on **5433**, not 5432, to avoid
 colliding with an existing local Postgres.
@@ -49,13 +54,67 @@ npx tsx scripts/smoke.ts
 That parses a schema, validates a configuration, compiles two variants, diffs them geometrically,
 and checks that broken and empty sources fail with useful messages.
 
+## Publishing
+
+Publishing is a gate, not a form. You point Datum at source; it compiles the default
+configuration in the sandbox, measures the result, and grades it:
+
+| Check | Blocks publishing |
+|---|---|
+| Compiles to geometry | **yes** |
+| Has configurable parameters | **yes** |
+| Closed, watertight solid | no |
+| Parameters are described | no |
+| Numeric parameters have ranges | no |
+| No schema warnings | no |
+| Plausible physical size | no |
+
+The two blocking checks are the ones that keep this a registry rather than a file dump. The
+second one is the anti-mesh rule in disguise: a part with no parameters is a fixed model, and
+fixed models are what every other site already has. The rest are quality advice, shown while the
+author is still looking at the file and most likely to act on it. `Plausible physical size` exists
+because modelling in metres is the most common way a part is technically valid and totally useless.
+
+Publishing re-runs the whole preflight server-side rather than trusting what the client reports,
+so a caller cannot assert its own readiness. The build produced by publishing is stored as the
+version's canonical default build, which means the first person to open the part page gets a cache
+hit rather than a cold compile.
+
+### Version bumps are proposed from evidence
+
+Fit-based semver only works if the numbers mean something, and authors reliably forget the rules.
+So `POST /api/parts/:owner/:slug/versions/propose` diffs the new schema against the released one,
+compares the measured geometry, and proposes the bump:
+
+- **major** — a parameter was removed, a range narrowed, a dropdown option disappeared, a type
+  changed, the default build's envelope moved, or the part stopped being a closed solid. All of
+  these break someone holding a saved configuration.
+- **minor** — a parameter or option was added, a range widened, a default changed, or internal
+  geometry moved while the envelope held.
+- **patch** — nothing detectable changed.
+
+The author may publish a *larger* bump than proposed but never a smaller one; the evidence is a
+floor. When a default value changed, geometry comparison is explicitly abandoned and says so — the
+two default builds are different configurations, so a size difference proves nothing.
+
+The honest limitation travels with every proposal: OpenSCAD emits meshes, not B-rep, so geometry is
+compared at the whole-part level. A change that rotates a bolt circle while keeping the same
+envelope will not be caught. It is a proposal, never applied silently.
+
+### Ownership
+
+There is no account system. Claiming a handle mints a token once, stored in the browser and
+unrecoverable; publishing to that handle requires it. That is enough to stop one author publishing
+under another's name in development and no more. It must be replaced before this is public — the
+trust-and-safety work (DMCA, ownership disputes, moderation) all assumes real identities.
+
 ## How it fits together
 
 ```
 apps/web            Vite + React configurator; three.js STL viewer
 services/api        Fastify + Postgres. Validation, build cache, artifacts, fit search.
 services/builder    Fastify + OpenSCAD. Isolated. Knows nothing about schemas or the registry.
-packages/scad-schema  Pure logic: parse Customizer annotations, validate, serialize, hash.
+packages/scad-schema  Pure logic: parse Customizer annotations, validate, serialize, hash, diff.
 db/migrations       SQL, applied on API start.
 seed/               Seed parts.
 ```
@@ -112,14 +171,16 @@ gVisor/Firecracker, and any authenticated rate limiting.
 
 ## Deliberately not built yet
 
-Publishing, accounts, forking, revision requests, geometric diff visualisation, dependency
-resolution, and anything social. Mesh upload is not a missing feature — accepting meshes would
-delete the entire technical differentiator, and the answer is no.
+Real accounts, forking, revision requests, geometric diff visualisation, dependency resolution,
+and anything social. Mesh upload is not a missing feature — accepting meshes would delete the
+entire technical differentiator, and the answer is no.
 
 ## Next
 
-1. Publish flow: point Datum at existing source, get a build report, declare interfaces, pick a
-   licence.
-2. Seed 100+ parts by importing permissively-licensed parametric source, which doubles as the
-   supply audit from the validation plan.
-3. Geometric diff between two builds — the visible payoff of everything above.
+1. Seed 100+ parts by importing permissively-licensed parametric source. This doubles as the
+   supply audit from the validation plan: what fraction of real-world parametric source builds
+   unattended is the number that decides whether any of this works.
+2. Forking — the permissionless-improvement primitive. The ancestry column and the schema diff
+   already exist; what is missing is the UI and the revision-request flow on top.
+3. Geometric diff between two builds, rendered. The bump proposal already computes the evidence;
+   showing it as a before/after overlay is the visible payoff.

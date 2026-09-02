@@ -155,6 +155,15 @@ describe("parseScad", () => {
     expect(parseScad(source).params.map((p) => p.name)).toEqual(["w"]);
   });
 
+  it("uses only the last comment line, so a file header is not swallowed", () => {
+    const source = [
+      "// A parametric spacer",
+      "// Outer diameter",
+      "outer_d = 20; // [8:60]",
+    ].join("\n");
+    expect(byName(parseScad(source).params, "outer_d").description).toBe("Outer diameter");
+  });
+
   it("clears a description when a blank line separates it from the assignment", () => {
     const source = ["// A stray note", "", "w = 5;"].join("\n");
     expect(byName(parseScad(source).params, "w").description).toBeUndefined();

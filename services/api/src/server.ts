@@ -10,23 +10,15 @@ import {
   type ScadSchema,
 } from "@datum/scad-schema";
 import { get as getArtifact, put as putArtifact } from "./artifacts.js";
+import { builderHealth, BuilderBusy, BuilderUnavailable, runBuild } from "./builder.js";
 import { migrate, pool } from "./db.js";
+import { publishRoutes } from "./publish.js";
 
 const PORT = Number(process.env.API_PORT ?? 8080);
-const BUILDER_URL = process.env.BUILDER_URL ?? "http://localhost:8081";
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
 await app.register(cors, { origin: true });
-
-interface BuilderResponse {
-  ok: boolean;
-  summary: string;
-  diagnostics: unknown[];
-  metrics: Record<string, unknown> | null;
-  durationMs: number;
-  timedOut: boolean;
-  artifacts: { stl: string | null; png: string | null };
-}
+await app.register(publishRoutes);
 
 interface VersionRow {
   id: string;
@@ -34,6 +26,7 @@ interface VersionRow {
   source: string;
   source_hash: string;
   schema: ScadSchema;
+  files: Record<string, string>;
   part_id: string;
   slug: string;
   handle: string;
@@ -44,7 +37,7 @@ interface VersionRow {
 
 async function loadVersion(owner: string, slug: string, version?: string): Promise<VersionRow | null> {
   const { rows } = await pool.query<VersionRow>(
-    `SELECT v.id, v.version, v.source, v.source_hash, v.schema,
+    `SELECT v.id, v.version, v.source, v.source_hash, v.schema, v.files,
             p.id AS part_id, p.slug, p.title, p.summary, p.license, u.handle
        FROM part_versions v
        JOIN parts p ON p.id = v.part_id
@@ -60,13 +53,7 @@ async function loadVersion(owner: string, slug: string, version?: string): Promi
 
 app.get("/health", async () => {
   const { rows } = await pool.query<{ n: string }>("SELECT count(*)::text AS n FROM parts");
-  let builder: unknown = null;
-  try {
-    builder = await (await fetch(`${BUILDER_URL}/health`)).json();
-  } catch {
-    builder = { ok: false, error: "unreachable" };
-  }
-  return { ok: true, parts: Number(rows[0]?.n ?? 0), builder };
+  return { ok: true, parts: Number(rows[0]?.n ?? 0), builder: await builderHealth() };
 });
 
 /** Browse parts. Ordered by most recently updated; search is a later feature. */
@@ -183,24 +170,23 @@ app.post<{ Params: { owner: string; slug: string }; Body: { params?: Record<stri
       };
     }
 
-    let built: BuilderResponse;
+    let built: Awaited<ReturnType<typeof runBuild>>;
     try {
-      const res = await fetch(`${BUILDER_URL}/build`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          source: v.source,
-          args: toArgs(v.schema, result.values),
-          renderPreview: true,
-        }),
+      built = await runBuild({
+        source: v.source,
+        args: toArgs(v.schema, result.values),
+        ...(v.files && Object.keys(v.files).length > 0 ? { files: v.files } : {}),
+        renderPreview: true,
       });
-      if (res.status === 503) {
+    } catch (err) {
+      if (err instanceof BuilderBusy) {
         return reply.code(503).header("retry-after", "3").send({ error: "builders are busy, retry shortly" });
       }
-      built = (await res.json()) as BuilderResponse;
-    } catch (err) {
-      request.log.error({ err }, "builder unreachable");
-      return reply.code(502).send({ error: "the build service is unavailable" });
+      if (err instanceof BuilderUnavailable) {
+        request.log.error({ err }, "builder unreachable");
+        return reply.code(502).send({ error: "the build service is unavailable" });
+      }
+      throw err;
     }
 
     let stlPath: string | null = null;

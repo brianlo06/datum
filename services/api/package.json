@@ -10,7 +10,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "seed": "tsx src/seed.ts",
-    "migrate": "tsx -e \"import('./src/db.js').then(async m => { console.log(await m.migrate()); process.exit(0); })\""
+    "migrate": "tsx -e \"import('./src/db.js').then(async m => { console.log(await m.migrate()); process.exit(0); })\"",
+    "test": "vitest run"
   },
   "dependencies": {
     "@datum/scad-schema": "*",

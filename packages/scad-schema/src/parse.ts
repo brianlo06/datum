@@ -380,7 +380,11 @@ export function parseScad(source: string): ScadSchema {
       continue;
     }
 
-    const description = pendingDescription.filter((d) => d.length > 0).join(" ") || undefined;
+    // Only the last comment line becomes the description, matching OpenSCAD's
+    // own Customizer. Joining the whole run would swallow a file header comment
+    // into the first parameter's label, which is a very common file shape.
+    const described = pendingDescription.filter((d) => d.length > 0);
+    const description = described.length > 0 ? described[described.length - 1] : undefined;
     const widget = parseAnnotation(trailing, literal.type, literal.value, bufferStart, warnings);
 
     seen.add(name);
