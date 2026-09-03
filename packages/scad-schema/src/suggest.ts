@@ -64,7 +64,7 @@ const NAME_RULES: NameRule[] = [
   {
     match: /(^|_)(d|dia|diameter|od|id|r|radius)($|_)/i,
     range: (v) => ({ min: round1(Math.max(0.5, v / 4)), max: round1(v * 4), step: pickStep(v) }),
-    rationale: "a diameter, scaled around the author's default",
+    rationale: "a diameter or radius, scaled around the author's default",
   },
   {
     match: /(^|_)(angle|rot|rotation|twist)($|_)/i,

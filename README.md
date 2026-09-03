@@ -18,7 +18,7 @@ build the thing that lets them.
 
 | Piece | Status |
 |---|---|
-| Customizer schema parser (`@datum/scad-schema`) | Working, 55 tests |
+| Customizer schema parser (`@datum/scad-schema`) | Working, 94 tests |
 | Parameter validation and safe `-D` serialization | Working |
 | Sandboxed OpenSCAD build service | Working, isolated |
 | STL parsing + geometry measurement | Working, 30 tests |
@@ -27,6 +27,8 @@ build the thing that lets them.
 | Configurator UI with live 3D preview | Working |
 | Publish flow with a readiness gate | Working, 15 tests |
 | Fit-based semver with automatic bump proposal | Working, 20 tests |
+| Library resolution (search paths + vendored BOSL2/Round-Anything/MCAD) | Working |
+| Assisted annotation of unannotated parameters | Working, 20 tests |
 | Minimal handle ownership (token, not accounts) | Working |
 | Forking, revision requests, geometric diff UI | **Not built** |
 
@@ -145,6 +147,19 @@ This is deliberately not a package manager. It is a short list of libraries comm
 almost every part assuming one assumes one of these; anything more exotic gets published with the
 part.
 
+### Assisted annotation
+
+The audit found only 2% of parameters in real source carry a range, so reading the author's
+annotations is not enough — most parts would render as a column of bare number boxes. Preflight
+therefore *proposes* ranges, from the parameter's name (mechanical CAD has real conventions for
+`tolerance`, `wall`, `bolt_d`, `angle`, `count`) and from the default's magnitude.
+
+Nothing is applied silently. A wrong range is worse than no range, because it rejects
+configurations the part genuinely supports — so name matches are high confidence and pre-selected,
+value-bracketed guesses are low and are not, negative defaults are declined rather than guessed, and
+a proposal is never allowed to exclude the author's own default. Accepted ranges are written back as
+ordinary Customizer comments, so they work in plain OpenSCAD too.
+
 ### Why OpenSCAD first
 
 OpenSCAD already has a Customizer annotation syntax — parameter descriptions, ranges, and dropdowns
@@ -196,11 +211,15 @@ gVisor/Firecracker, and any authenticated rate limiting.
 Measured, not assumed: [`docs/supply-audit.md`](docs/supply-audit.md) compiles 238 candidate parts
 from 44 real GitHub repositories through the actual sandbox.
 
-- **70% build unattended.** The kill criterion from the brief is passed.
-- **69% of failures involve an unresolved external library** — resolving them would reach ~91%.
+- **60% build completely.** The kill criterion from the brief is passed.
+- **14% of parts that produced geometry were silently incomplete**, and 19 of those 23 were
+  watertight — a healthy-looking dimension report on a part with pieces missing. OpenSCAD downgrades
+  an unresolvable `include <>` to a warning and carries on. That is now a build failure.
 - **Only 2% of parameters carry a Customizer annotation.** The "authors already annotated, so the
-  configurator is free" assumption does not survive contact with real code. Parts still get a
-  working configurator, but of bare number boxes.
+  configurator is free" assumption does not survive contact with real code — hence assisted
+  annotation.
+- **Compute time is the binding constraint**, not include resolution: 86% of parts build in under
+  25 s, the rest need much longer.
 
 Re-run it with `npx tsx scripts/audit/fetch-corpus.ts && npx tsx scripts/audit/run.ts`.
 
@@ -212,11 +231,10 @@ entire technical differentiator, and the answer is no.
 
 ## Next
 
-1. **Library dependency resolution.** The audit's clearest result: 69% of build failures are an
-   unresolved `include <>`, and a handful of libraries (BOSL2, dotSCAD, NopSCADlib) account for most
-   of them. Worth ~21 percentage points of build rate — more than anything else on this list.
-2. **Assisted annotation.** Since authors overwhelmingly do not annotate, propose ranges and widgets
-   from the bare assignments and let the author accept them. This is now a core feature rather than
-   a nicety, and it is the clearest answer to "why publish here rather than on GitHub".
+1. **Seed the registry.** The import harness, library resolution and the readiness gate all exist
+   now; what does not exist is content. ~400 repositories would yield ~500 parts at the measured
+   rate.
+2. **Split the build budget.** Compute time, not include resolution, is now the binding constraint.
+   Interactive configuration needs a short timeout; a one-off publish build can afford far more.
 3. **Forking** — the permissionless-improvement primitive. The ancestry column and the schema diff
    already exist; the revision-request flow and UI do not.

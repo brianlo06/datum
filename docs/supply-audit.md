@@ -5,14 +5,21 @@ will not build unattended, geometry CI is a fantasy and the whole differentiator
 Everything built so far had been validated against source I wrote myself, which is the friendliest
 possible input. This measures the unfriendly case.
 
-**Answer.** The thesis survives, but one of its supporting assumptions does not.
+**Answer.** The thesis survives. Two of its supporting assumptions do not, and the audit found a
+defect that would have shipped wrong parts to real people.
 
-- **70% of candidate parts build unattended** (75% excluding runs degraded by a size cap). Geometry
-  CI works on real code.
+- **60% of candidate parts build completely and honestly.** Geometry CI works on real code.
+- **14% of parts that produced geometry were silently incomplete** — and 19 of those 23 were
+  watertight, so the dimension report looked perfectly healthy. Datum would have published a part
+  with pieces missing and a green badge on it. This is the most valuable thing the audit produced.
 - **Only 2% of parameters carry a Customizer annotation.** The "authors already annotated their
-  parameters, so a configurator is free" assumption is essentially false at scale.
-- **69% of build failures involve an unresolved external library.** Resolving library dependencies
-  would raise the ceiling from 70% to roughly **91%** — the highest-leverage feature this surfaced.
+  parameters, so a configurator is free" assumption is false at scale.
+- **Compute time is the binding constraint**, not include resolution: raising the build budget from
+  25 s to 90 s cut timeouts from 28% to 8%.
+
+> **A note on the numbers.** An earlier pass reported 70%. That figure was wrong — it counted
+> silently incomplete builds as successes, for the reason set out under *The defect* below. Every
+> figure here is from the final run, with include resolution and the incompleteness gate in place.
 
 ---
 
@@ -43,30 +50,63 @@ includes work. Reproduce with `npx tsx scripts/audit/run.ts`; raw results in `va
 
 | Outcome | n | % |
 |---|---:|---:|
-| **built** | 167 | **70%** |
-| unknown-name (usually a missing library) | 19 | 8% |
-| timeout (>25 s) | 14 | 6% |
-| syntax error | 11 | 5% |
-| assertion rejected the defaults | 11 | 5% |
-| other | 16 | 7% |
+| **built completely** | 142 | **60%** |
+| missing include — geometry would have been dropped | 39 | 16% |
+| still exceeds 90 s | 19 | 8% |
+| syntax error | 12 | 5% |
+| assertion rejected the defaults | 2 | 1% |
+| unknown name | 2 | 1% |
+| other (non-zero exit, no geometry) | 22 | 9% |
 
 Simple parts build far better than big assemblies:
 
 | Bucket | built | passes publish gate |
 |---|---:|---:|
-| popular | 54% | 29% |
-| known | 59% | 31% |
-| modest | 89% | 74% |
-| long-tail | 87% | 64% |
+| popular | 36% | 15% |
+| known | 47% | 22% |
+| modest | 80% | 63% |
+| long-tail | 85% | 61% |
 
 The popular repos are multi-file products (Prusa i3, Framework Laptop, BOSL2) with heavy library
 dependencies and slow CSG. The modest and long-tail repos are individual functional parts — which
 is exactly the initial niche the brief recommended. **The audit independently confirms the niche
 choice.**
 
-### The annotation gap — the finding that changes the plan
+### The defect: a missing include does not fail the build
 
-Of the 167 that built, 112 (67%) expose at least one parameter. Across those, **1,058 parameters**:
+OpenSCAD downgrades an unresolvable `include <>` to a warning, renders whatever it still
+understands, and exits zero. Isolated on a synthetic part:
+
+| | `ok` | triangles | bounding box |
+|---|---|---:|---|
+| include unresolved | **true** | 12 | 10 × 10 × 10 |
+| include resolved | true | 24 | **30 × 10 × 10** |
+
+In the corpus, **23 of 168 parts that produced any geometry (14%) were missing pieces**, and **19 of
+those 23 were watertight closed solids**. A registry whose entire claim is "the build is the quality
+gate" would have handed someone a keycap without its stem, with a healthy dimension report attached.
+
+The gate now treats this as a build failure and names the missing file or unknown module. It is worth
+noticing that this class of bug is invisible to any amount of testing against source you wrote
+yourself — it only appears when you run other people's code.
+
+### Build cost
+
+| | |
+|---|---|
+| median | 3.7 s |
+| p90 | 28.6 s |
+| under 5 s | 58% |
+| under 25 s | 86% |
+
+A single budget cannot serve both an interactive configure and a one-off publish. 86% of parts fit
+comfortably in an interactive budget; the remaining 14% need a publish-time budget several times
+larger.
+
+### The annotation gap
+
+Of the 142 that built, 89 (63%) expose at least one parameter. Across the corpus, **1,058
+parameters**:
 
 | | n | % |
 |---|---:|---:|
@@ -89,13 +129,13 @@ present in 4% of parts rather than most of them.
 | Filter | n |
 |---|---:|
 | candidate parts sampled | 238 |
-| builds | 167 |
-| builds **and** passes the publish gate | 112 |
-| ...**and** carries a clear licence | **55** (from 17 repos) |
+| builds completely | 142 |
+| builds **and** passes the publish gate | 89 |
+| ...**and** carries a clear licence | ~45 |
 | ...**and** has any annotated parameter | 2 |
 
-**Roughly one in four** real-world OpenSCAD files that look like parts could be imported today. At
-that yield, ~400 repositories would produce ~500 parts — well within reach of the harness now built.
+**Roughly one in five** real-world OpenSCAD files that look like parts could be imported today. At
+that yield, ~500 repositories would produce ~500 parts — within reach of the harness now built.
 
 Licensing is worse than expected: 128 of 238 (54%) have no licence or `NOASSERTION`. The most common
 actual licence is GPL-3.0 (49), whose application to hardware designs is legally murky.
@@ -107,59 +147,29 @@ geometry"*. That first number is worth sitting with — **a third of files that 
 hardcoded models with no parameters at all.** They are meshes in source form, and the gate correctly
 refuses them. The gate is doing real work rather than waving everything through.
 
-## What this changes
+## What this changed
 
-1. **Ship library dependency resolution.** 69% of failures involve an unresolved include, and the
-   same handful of libraries (BOSL2, dotSCAD, NopSCADlib, Round-Anything, threads.scad) account for
-   most of them. Vendoring a small set of known libraries into the build sandbox — or resolving them
-   as declared dependencies — moves the build rate from 70% to about 91%. Nothing else on the
-   roadmap has that leverage.
+Three of these are **done**; they were built in response to this audit.
 
-2. **Assisted annotation becomes a core feature, not a nicety.** Since authors do not annotate,
-   Datum has to help. Given `wall = 2.4;` it can propose a plausible range and a widget, show the
-   author the resulting configurator, and let them accept with one click. This turns the annotation
-   gap from an obstacle into the clearest reason to publish here rather than on GitHub — *"we turned
-   your 8 raw variables into a real interface."* It also makes the existing readiness warnings
-   actionable instead of merely accusatory.
+1. ~~**Fail silently-incomplete builds.**~~ **Done.** The highest-value fix, and the one that would
+   never have been found without running strangers' code.
 
-3. **Reduce timeouts, or make them explicit.** 6% exceeded 25 s. Some are genuinely heavy CSG. A
-   longer budget for a one-off publish build, with a shorter one for interactive configuration, is
-   the obvious split.
+2. ~~**Resolve includes.**~~ **Done.** Search paths from the part's own files — most unresolved
+   includes turned out to be projects expecting to be *installed*, not third-party libraries — plus
+   a small vendored set (BOSL2, Round-Anything, MCAD) pinned to immutable commits, with the set's
+   digest folded into every build hash so bumping one invalidates cached geometry.
 
-4. **Do not plan on scraped seeding alone.** 55 importable parts from 44 repos, of which 2 have a
-   good configurator. Seeding fills the shelves; it does not produce a compelling front page. The
-   concierge and interview work from the validation plan still has to happen.
+3. ~~**Assisted annotation.**~~ **Done.** Datum proposes ranges from the parameter's name and
+   default; the author reviews and accepts, and accepted ranges are written back as ordinary
+   Customizer comments. This turns the annotation gap into the clearest answer to *"why publish here
+   rather than on GitHub"*.
 
-## Follow-up: library resolution, and a defect it exposed
+4. **Split the build budget.** Still to do. 86% of parts build in under 25 s; the rest need a much
+   larger publish-time budget. One timeout cannot serve both an interactive configure and a publish.
 
-Acting on finding 1 (resolve library dependencies) produced a result worth recording, because the
-naive reading of it is wrong.
-
-Two mechanisms were added: search paths derived from the part's own files, and a small vendored
-library set (BOSL2, Round-Anything, MCAD) pinned to immutable commits. Re-running the audit, the
-measured build rate **fell from 70% to 50%**, and timeouts rose from 14 to 67.
-
-That looks like a regression. It is not. Isolating the mechanism on a synthetic part:
-
-| | `ok` | triangles | bounding box |
-|---|---|---:|---|
-| include unresolved | **true** | 12 | 10 × 10 × 10 |
-| include resolved | true | 24 | **30 × 10 × 10** |
-
-**A missing include does not fail the build.** OpenSCAD downgrades it to a warning, renders whatever
-it still understands, and exits zero — producing a watertight solid that is materially the wrong
-part. The original 70% therefore included an unknown number of silently incomplete builds that had
-been scored as successes. Resolving includes makes those parts render in full, which is both more
-correct and far more expensive, and the cost lands on a 25-second timeout.
-
-So the honest conclusion is not "library resolution made things worse". It is:
-
-1. **The earlier 70% was optimistic**, because a partial model counted as a success.
-2. **Compute time, not include resolution, is now the binding constraint.**
-3. **The publish gate had a real defect.** A build that silently drops geometry is now reported as a
-   failure with a specific reason — the missing file or the unknown module is named — rather than
-   published with a healthy-looking dimension report. This is the single most valuable thing the
-   audit produced, and it would never have surfaced from source written in-house.
+5. **Do not plan on scraped seeding alone.** ~45 importable parts from 44 repos, of which 2 have a
+   good configurator out of the box. Seeding fills the shelves; it does not produce a compelling
+   front page. The concierge and interview work from the validation plan still has to happen.
 
 ## Limitations
 
@@ -167,8 +177,7 @@ So the honest conclusion is not "library resolution made things worse". It is:
 - GitHub only, and only repos GitHub labels `language:OpenSCAD`. Parts published on Printables or
   Thingiverse as bare `.scad` attachments are not represented, and may be *more* annotated, since
   Thingiverse Customizer was the reason that syntax exists.
-- 39 of 238 builds had files dropped by a 400 KB per-file cap; those built at 44% versus 75% for
-  clean runs, so the true rate is likely nearer 75%.
+- 39 of 238 builds had files dropped by a 400 KB per-file cap, which depresses their build rate.
 - The static classifier has false positives: some library files call a demo module at the top level
   and were compiled as parts. This depresses the measured build rate rather than inflating it.
 - Sampling up to 12 files per repo means large repos are under-represented relative to their size.
