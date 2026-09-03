@@ -139,16 +139,29 @@ export function validate(schema: ScadSchema, input: Record<string, unknown>): Va
 }
 
 /**
- * A stable fingerprint of (source, parameters). Two builds with the same hash
- * must produce the same geometry, which is what makes the artifact cache and
- * the "has anyone built exactly this?" lookup possible.
+ * A stable fingerprint of (source, parameters, build environment).
+ *
+ * Two builds with the same hash must produce the same geometry -- that is what
+ * makes the artifact cache and the "has anyone built exactly this?" lookup
+ * sound. The environment digest matters because geometry also depends on the
+ * vendored library set: bumping BOSL2 can change what a part compiles to, and
+ * without folding that in, the cache would serve the old geometry forever under
+ * an address that no longer describes it.
+ *
+ * Omitting `envDigest` reproduces the pre-environment hash exactly, so callers
+ * that genuinely have no environment to account for are unaffected.
  */
-export function buildHash(sourceHash: string, values: Record<string, ParamValue>): string {
+export function buildHash(
+  sourceHash: string,
+  values: Record<string, ParamValue>,
+  envDigest = "",
+): string {
   const canonical = Object.keys(values)
     .sort()
     .map((k) => `${k}=${serializeValue(values[k]!)}`)
     .join(";");
-  return createHash("sha256").update(`${sourceHash} ${canonical}`).digest("hex");
+  const suffix = envDigest === "" ? "" : ` ${envDigest}`;
+  return createHash("sha256").update(`${sourceHash} ${canonical}${suffix}`).digest("hex");
 }
 
 export function hashSource(source: string): string {

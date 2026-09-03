@@ -153,4 +153,17 @@ describe("buildHash", () => {
   it("does not collide across differently-typed values that stringify alike", () => {
     expect(buildHash(src, { a: 1 })).not.toBe(buildHash(src, { a: "1" }));
   });
+
+  it("changes when the build environment changes", () => {
+    // Bumping a vendored library must invalidate cached geometry.
+    expect(buildHash(src, { a: 1 }, "libs-v1")).not.toBe(buildHash(src, { a: 1 }, "libs-v2"));
+  });
+
+  it("is unchanged when no environment digest is supplied", () => {
+    expect(buildHash(src, { a: 1 }, "")).toBe(buildHash(src, { a: 1 }));
+  });
+
+  it("does not let an environment digest be confused with a parameter value", () => {
+    expect(buildHash(src, { a: 1 }, "x")).not.toBe(buildHash(src, { a: 1, " ": "x" }));
+  });
 });
