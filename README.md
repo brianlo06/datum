@@ -123,6 +123,28 @@ The builder is deliberately dumb: it receives pre-serialized `-D` arguments and 
 plus measurements. It has no database access, no knowledge of parts, and no network. That keeps the
 component running untrusted code as small and as boring as possible.
 
+### Library resolution
+
+Builds are isolated, but total isolation was the single biggest cause of failure in the supply
+audit — and mostly not for the reason expected. Two mechanisms now resolve includes:
+
+1. **Search paths from the part's own files.** Many projects are written to be *installed*: their
+   examples say `include <src/thing.scad>` and expect the project on `OPENSCADPATH` rather than
+   beside the file. A build request can name directories within the part to put on the search path.
+2. **A small vendored library set**, pinned to immutable commits and baked into the sandbox image:
+   BOSL2, Round-Anything and MCAD. See `services/builder/libraries.json`.
+
+Precedence is build root → the part's declared directories → vendored libraries, so **a part can
+always shadow a library** with its own file of the same name.
+
+The library set has a digest, and that digest is folded into every build hash. Bumping BOSL2 changes
+what parts compile to, so it must invalidate cached artifacts rather than leave them serving stale
+geometry under a content address that no longer describes them.
+
+This is deliberately not a package manager. It is a short list of libraries common enough that
+almost every part assuming one assumes one of these; anything more exotic gets published with the
+part.
+
 ### Why OpenSCAD first
 
 OpenSCAD already has a Customizer annotation syntax — parameter descriptions, ranges, and dropdowns

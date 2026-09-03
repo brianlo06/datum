@@ -42,9 +42,11 @@ const RULES: Rule[] = [
     hint: "Check for a missing semicolon, bracket, or brace at or just before the reported line.",
   },
   {
-    match: /Can'?t open input file|Unable to open .*\.scad/i,
+    // OpenSCAD says "input file" for the entry, "include file" for include <>,
+    // and just "library" for use <>; all three mean the same thing here.
+    match: /Can'?t open (?:input|include) file|Can'?t open library|Unable to open .*\.scad/i,
     explanation: "An included file could not be found.",
-    hint: "Datum builds each part in isolation, so `include <>` and `use <>` can only reference files published with the part. External library includes are not resolved yet.",
+    hint: "Datum builds each part in isolation, so `include <>` and `use <>` resolve against files published with the part, plus a small set of vendored libraries (BOSL2, Round-Anything, MCAD). If the file lives elsewhere in your project, publish it alongside the part or add its directory to the part's search paths.",
   },
   {
     match: /Ignoring unknown (variable|module|function) '(?<name>[^']+)'/i,

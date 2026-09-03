@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import Fastify from "fastify";
+import { librarySet } from "./libraries.js";
 import { build as compile, UnsafeFilenameError } from "./openscad.js";
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +23,7 @@ interface BuildBody {
   args?: unknown;
   files?: unknown;
   entry?: unknown;
+  searchPaths?: unknown;
   renderPreview?: unknown;
   timeoutMs?: unknown;
 }
@@ -41,7 +43,22 @@ app.get("/health", async () => {
   } catch {
     version = null;
   }
-  return { ok: version !== null, kernel: "openscad", version, active, maxConcurrent: MAX_CONCURRENT };
+  const libs = await librarySet();
+  return {
+    ok: version !== null,
+    kernel: "openscad",
+    version,
+    active,
+    maxConcurrent: MAX_CONCURRENT,
+    // The API needs this digest to keep the build cache honest across library bumps.
+    libraryDigest: libs.digest,
+    libraries: libs.libraries.map((l) => ({
+      name: l.name,
+      version: l.version,
+      license: l.license,
+      include: l.include,
+    })),
+  };
 });
 
 app.post("/build", async (request, reply) => {
@@ -58,6 +75,9 @@ app.post("/build", async (request, reply) => {
   }
   if (body.entry !== undefined && typeof body.entry !== "string") {
     return reply.code(400).send({ error: "entry must be a string" });
+  }
+  if (body.searchPaths !== undefined && !isStringArray(body.searchPaths)) {
+    return reply.code(400).send({ error: "searchPaths must be an array of strings" });
   }
 
   let files: Record<string, string> | undefined;
@@ -85,6 +105,7 @@ app.post("/build", async (request, reply) => {
       args: (body.args as string[] | undefined) ?? [],
       ...(files ? { files } : {}),
       ...(typeof body.entry === "string" ? { entry: body.entry } : {}),
+      ...(isStringArray(body.searchPaths) ? { searchPaths: body.searchPaths } : {}),
       renderPreview: body.renderPreview === true,
       ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {}),
     });

@@ -18,6 +18,15 @@ export interface BuildRequest {
    * correctly if the original layout is preserved.
    */
   entry?: string;
+  /**
+   * Directories within the part, relative to the build root, to put on
+   * OPENSCADPATH. Many projects are written to be *installed* -- their examples
+   * say `include <src/thing.scad>` or even `include <theproject/thing.scad>` and
+   * expect the library to be on the search path rather than beside the file.
+   * The supply audit found this to be the single most common cause of an
+   * unresolved include, well ahead of genuinely third-party libraries.
+   */
+  searchPaths?: string[];
   renderPreview?: boolean;
   timeoutMs?: number;
 }
@@ -52,6 +61,8 @@ const DEFAULTS = {
   wrapper: process.env.OPENSCAD_WRAPPER ? process.env.OPENSCAD_WRAPPER.split(" ") : [],
   defaultTimeoutMs: Number(process.env.BUILD_TIMEOUT_MS ?? 30_000),
   maxOutputBytes: Number(process.env.BUILD_MAX_OUTPUT_BYTES ?? 50 * 1024 * 1024),
+  /** Vendored third-party libraries, always on the search path. */
+  libraryDir: process.env.OPENSCAD_LIBRARY_DIR ?? "/opt/openscad-libraries",
 } as const;
 
 export class UnsafeFilenameError extends Error {}
@@ -88,6 +99,27 @@ export function safeJoin(dir: string, name: string): string {
   return target;
 }
 
+/**
+ * Assemble OPENSCADPATH for a build: the build root first, then the part's
+ * declared directories, then the vendored libraries. Nearest wins, so a part
+ * can always shadow a library.
+ *
+ * A declared search path that escapes the build directory is ignored rather
+ * than fatal; it is a hint from the caller, not part of the part's contents.
+ */
+export function assembleSearchPath(dir: string, searchPaths: string[], libraryDir: string): string {
+  const searchDirs = [dir];
+  for (const relative of searchPaths) {
+    try {
+      searchDirs.push(safeJoin(dir, relative));
+    } catch {
+      // ignored: see above
+    }
+  }
+  searchDirs.push(libraryDir);
+  return searchDirs.join(":");
+}
+
 interface SpawnOutcome {
   code: number | null;
   stderr: string;
@@ -120,12 +152,20 @@ function run(
   argv: string[],
   cwd: string,
   timeoutMs: number,
+  openscadPath?: string,
 ): Promise<SpawnOutcome> {
   return new Promise((resolve) => {
     const child = spawn(command, argv, {
       cwd,
       // A blank environment: the build gets no inherited credentials or config.
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: cwd, TMPDIR: cwd },
+      // OPENSCADPATH is the one exception, and it only ever names directories
+      // inside this build or the read-only vendored library tree.
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: cwd,
+        TMPDIR: cwd,
+        ...(openscadPath ? { OPENSCADPATH: openscadPath } : {}),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -201,9 +241,11 @@ export async function build(request: BuildRequest, options: RunnerOptions = {}):
     await mkdir(join(mainPath, ".."), { recursive: true });
     await writeFile(mainPath, request.source, "utf8");
 
+    const openscadPath = assembleSearchPath(dir, request.searchPaths ?? [], opts.libraryDir);
+
     const stlPath = join(dir, "out.stl");
     const stlCmd = commandFor(opts, false, ["-o", stlPath, ...request.args, mainPath]);
-    const stlRun = await run(stlCmd.command, stlCmd.argv, dir, timeoutMs);
+    const stlRun = await run(stlCmd.command, stlCmd.argv, dir, timeoutMs, openscadPath);
 
     const diagnostics = parseDiagnostics(stlRun.stderr);
 
@@ -279,7 +321,7 @@ export async function build(request: BuildRequest, options: RunnerOptions = {}):
         ...request.args,
         mainPath,
       ]);
-      const previewRun = await run(previewCmd.command, previewCmd.argv, dir, timeoutMs);
+      const previewRun = await run(previewCmd.command, previewCmd.argv, dir, timeoutMs, openscadPath);
       // A failed preview is cosmetic: the geometry already built, so the build
       // still succeeds and the client falls back to rendering the STL itself.
       // It is recorded as a warning rather than swallowed, because a preview

@@ -50,8 +50,16 @@ describe("parseDiagnostics", () => {
   });
 
   it("recognises a missing include and explains the isolation rule", () => {
-    const out = parseDiagnostics("WARNING: Can't open input file 'BOSL2/std.scad'.");
-    expect(out[0]!.hint).toContain("published with the part");
+    // OpenSCAD's wording differs between the entry file, include <> and use <>.
+    for (const raw of [
+      "WARNING: Can't open input file 'NopSCADlib/lib.scad'.",
+      "WARNING: Can't open include file 'NopSCADlib/lib.scad'.",
+      "WARNING: Can't open library 'NopSCADlib/lib.scad'.",
+    ]) {
+      const out = parseDiagnostics(raw);
+      expect(out[0]!.explanation).toContain("could not be found");
+      expect(out[0]!.hint).toContain("published with the part");
+    }
   });
 
   it("handles empty and whitespace-only stderr", () => {

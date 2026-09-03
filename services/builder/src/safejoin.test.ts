@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeJoin, UnsafeFilenameError } from "./openscad.js";
+import { assembleSearchPath, safeJoin, UnsafeFilenameError } from "./openscad.js";
 
 const ROOT = "/tmp/datum-build-xyz";
 
@@ -56,5 +56,25 @@ describe("safeJoin", () => {
   it("is not fooled by a sibling directory sharing the root's prefix", () => {
     // /tmp/datum-build-xyz-evil must not count as inside /tmp/datum-build-xyz.
     expect(() => safeJoin(ROOT, "../datum-build-xyz-evil/x.scad")).toThrow(UnsafeFilenameError);
+  });
+});
+
+describe("assembleSearchPath", () => {
+  const LIBS = "/opt/openscad-libraries";
+
+  it("orders build root, then the part's directories, then the vendored libraries", () => {
+    expect(assembleSearchPath(ROOT, ["src", "lib/scad"], LIBS)).toBe(
+      `${ROOT}:${ROOT}/src:${ROOT}/lib/scad:${LIBS}`,
+    );
+  });
+
+  it("works with no declared search paths", () => {
+    expect(assembleSearchPath(ROOT, [], LIBS)).toBe(`${ROOT}:${LIBS}`);
+  });
+
+  it("silently drops a search path that escapes the build directory", () => {
+    expect(assembleSearchPath(ROOT, ["../elsewhere", "/etc", "src"], LIBS)).toBe(
+      `${ROOT}:${ROOT}/src:${LIBS}`,
+    );
   });
 });

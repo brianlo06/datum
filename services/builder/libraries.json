@@ -1,0 +1,45 @@
+{
+  "comment": [
+    "Third-party OpenSCAD libraries vendored into the build sandbox and placed on",
+    "OPENSCADPATH, so that `include <BOSL2/std.scad>` resolves in an isolated build.",
+    "",
+    "Everything here is pinned to an immutable commit, never a branch: the geometry a",
+    "part produces depends on these, so a floating ref would silently change published",
+    "parts. The set's digest is folded into every build hash, which means bumping a",
+    "library correctly invalidates the artifact cache rather than serving stale",
+    "geometry under an unchanged address.",
+    "",
+    "Licences are recorded and each library's own LICENSE file is kept in the image.",
+    "Keep this set small and well-known; it is not a general package manager, and a",
+    "part needing something exotic should publish it among its own files."
+  ],
+  "libraries": [
+    {
+      "name": "BOSL2",
+      "repo": "https://github.com/BelfrySCAD/BOSL2.git",
+      "ref": "fcfce7c763863d8e66d5f36a551d11129ec1a607",
+      "version": "v2.0.753",
+      "license": "BSD-2-Clause",
+      "include": "BOSL2/std.scad",
+      "why": "By far the most used OpenSCAD library, and the most common unresolved include in the supply audit."
+    },
+    {
+      "name": "Round-Anything",
+      "repo": "https://github.com/Irev-Dev/Round-Anything.git",
+      "ref": "1bf9f2a8985052144cdc1801f43f7a4932f7b55d",
+      "version": "1.0.4",
+      "license": "MIT",
+      "include": "Round-Anything/polyround.scad",
+      "why": "Widely used for filleting, which functional printed parts need constantly."
+    },
+    {
+      "name": "MCAD",
+      "repo": "https://github.com/openscad/MCAD.git",
+      "ref": "a7be3d623669d635b7249a327cfce5796ea200b3",
+      "version": "openscad-2019.05",
+      "license": "LGPL-2.1",
+      "include": "MCAD/involute_gears.scad",
+      "why": "The historic bundled library; older parts assume it is installed."
+    }
+  ]
+}
