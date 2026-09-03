@@ -169,6 +169,19 @@ gVisor/Firecracker, and any authenticated rate limiting.
 - **A failed build keeps the last good geometry on screen**, clearly badged. Blanking the viewport
   every time a slider crosses an invalid range is worse than a labelled stale model.
 
+## Does this work on real source?
+
+Measured, not assumed: [`docs/supply-audit.md`](docs/supply-audit.md) compiles 238 candidate parts
+from 44 real GitHub repositories through the actual sandbox.
+
+- **70% build unattended.** The kill criterion from the brief is passed.
+- **69% of failures involve an unresolved external library** — resolving them would reach ~91%.
+- **Only 2% of parameters carry a Customizer annotation.** The "authors already annotated, so the
+  configurator is free" assumption does not survive contact with real code. Parts still get a
+  working configurator, but of bare number boxes.
+
+Re-run it with `npx tsx scripts/audit/fetch-corpus.ts && npx tsx scripts/audit/run.ts`.
+
 ## Deliberately not built yet
 
 Real accounts, forking, revision requests, geometric diff visualisation, dependency resolution,
@@ -177,10 +190,11 @@ entire technical differentiator, and the answer is no.
 
 ## Next
 
-1. Seed 100+ parts by importing permissively-licensed parametric source. This doubles as the
-   supply audit from the validation plan: what fraction of real-world parametric source builds
-   unattended is the number that decides whether any of this works.
-2. Forking — the permissionless-improvement primitive. The ancestry column and the schema diff
-   already exist; what is missing is the UI and the revision-request flow on top.
-3. Geometric diff between two builds, rendered. The bump proposal already computes the evidence;
-   showing it as a before/after overlay is the visible payoff.
+1. **Library dependency resolution.** The audit's clearest result: 69% of build failures are an
+   unresolved `include <>`, and a handful of libraries (BOSL2, dotSCAD, NopSCADlib) account for most
+   of them. Worth ~21 percentage points of build rate — more than anything else on this list.
+2. **Assisted annotation.** Since authors overwhelmingly do not annotate, propose ranges and widgets
+   from the bare assignments and let the author accept them. This is now a core feature rather than
+   a nicety, and it is the clearest answer to "why publish here rather than on GitHub".
+3. **Forking** — the permissionless-improvement primitive. The ancestry column and the schema diff
+   already exist; the revision-request flow and UI do not.

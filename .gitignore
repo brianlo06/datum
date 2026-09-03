@@ -8,3 +8,5 @@ dist/
 /tmp-build/
 coverage/
 apps/web/dist/
+var/corpus/
+var/audit/

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { parseDiagnostics, summarize, type Diagnostic } from "./diagnostics.js";
 import { measure, parseStl, type MeshMetrics } from "./stl.js";
 
@@ -11,6 +11,13 @@ export interface BuildRequest {
   args: string[];
   /** Additional files published with the part, for include/use resolution. */
   files?: Record<string, string>;
+  /**
+   * Where to place the entry source within the build directory, defaulting to
+   * `main.scad`. OpenSCAD resolves `include <>` relative to the including file,
+   * so a part whose entry lives in a subdirectory only resolves its siblings
+   * correctly if the original layout is preserved.
+   */
+  entry?: string;
   renderPreview?: boolean;
   timeoutMs?: number;
 }
@@ -47,15 +54,38 @@ const DEFAULTS = {
   maxOutputBytes: Number(process.env.BUILD_MAX_OUTPUT_BYTES ?? 50 * 1024 * 1024),
 } as const;
 
-/** Reject filenames that could escape the build directory. */
-const SAFE_FILENAME = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
-
 export class UnsafeFilenameError extends Error {}
 
-function assertSafeFilename(name: string): void {
-  if (!SAFE_FILENAME.test(name) || name.split("/").includes("..")) {
-    throw new UnsafeFilenameError(`Refusing to write file outside the build directory: ${name}`);
+/**
+ * Resolve a published filename inside the build directory, or refuse.
+ *
+ * This is a containment check rather than a character whitelist. A whitelist
+ * looked safer but was wrong twice over: it rejected the many real-world files
+ * named like `Steady Rest.scad` or `Bracket (v2).scad`, and it reasoned about
+ * spelling instead of about where the path actually lands. Resolving the path
+ * and asserting it stays under the build root is both stricter and more
+ * permissive in the right directions.
+ */
+export function safeJoin(dir: string, name: string): string {
+  if (name === "" || name.includes("\0")) {
+    throw new UnsafeFilenameError(`Refusing an empty or NUL-bearing filename`);
   }
+  if (name.includes("\\")) {
+    throw new UnsafeFilenameError(`Refusing a filename containing a backslash: ${name}`);
+  }
+  if (isAbsolute(name)) {
+    throw new UnsafeFilenameError(`Refusing an absolute path: ${name}`);
+  }
+
+  const root = resolve(dir);
+  const target = resolve(root, name);
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new UnsafeFilenameError(`Refusing to write outside the build directory: ${name}`);
+  }
+  if (target === root) {
+    throw new UnsafeFilenameError(`Refusing a filename that resolves to the build directory: ${name}`);
+  }
+  return target;
 }
 
 interface SpawnOutcome {
@@ -158,13 +188,18 @@ export async function build(request: BuildRequest, options: RunnerOptions = {}):
 
   const dir = await mkdtemp(join(tmpdir(), "datum-build-"));
   try {
-    const mainPath = join(dir, "main.scad");
-    await writeFile(mainPath, request.source, "utf8");
+    const entry = request.entry ?? "main.scad";
+    const mainPath = safeJoin(dir, entry);
 
     for (const [name, content] of Object.entries(request.files ?? {})) {
-      assertSafeFilename(name);
-      await writeFile(join(dir, name), content, "utf8");
+      if (name === entry) continue; // the entry comes from `source`
+      const path = safeJoin(dir, name);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, content, "utf8");
     }
+
+    await mkdir(join(mainPath, ".."), { recursive: true });
+    await writeFile(mainPath, request.source, "utf8");
 
     const stlPath = join(dir, "out.stl");
     const stlCmd = commandFor(opts, false, ["-o", stlPath, ...request.args, mainPath]);

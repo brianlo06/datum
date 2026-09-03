@@ -12,7 +12,7 @@ const MAX_CONCURRENT = Number(process.env.BUILD_CONCURRENCY ?? 2);
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? "info" },
-  bodyLimit: 8 * 1024 * 1024,
+  bodyLimit: 24 * 1024 * 1024,
 });
 
 let active = 0;
@@ -21,6 +21,7 @@ interface BuildBody {
   source?: unknown;
   args?: unknown;
   files?: unknown;
+  entry?: unknown;
   renderPreview?: unknown;
   timeoutMs?: unknown;
 }
@@ -55,6 +56,9 @@ app.post("/build", async (request, reply) => {
   if (body.args !== undefined && !isStringArray(body.args)) {
     return reply.code(400).send({ error: "args must be an array of strings" });
   }
+  if (body.entry !== undefined && typeof body.entry !== "string") {
+    return reply.code(400).send({ error: "entry must be a string" });
+  }
 
   let files: Record<string, string> | undefined;
   if (body.files !== undefined) {
@@ -80,6 +84,7 @@ app.post("/build", async (request, reply) => {
       source: body.source,
       args: (body.args as string[] | undefined) ?? [],
       ...(files ? { files } : {}),
+      ...(typeof body.entry === "string" ? { entry: body.entry } : {}),
       renderPreview: body.renderPreview === true,
       ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {}),
     });

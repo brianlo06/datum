@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import {
   buildHash as computeBuildHash,
@@ -19,7 +20,23 @@ import { checkChosenVersion, proposeBump, type BumpProposal, type GeometrySummar
 const MAX_SOURCE_BYTES = 1_000_000;
 const MAX_FILES = 20;
 const SLUG = /^[a-z0-9][a-z0-9-]{1,63}$/;
-const SAFE_FILENAME = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+/**
+ * Accept the filenames real repositories use -- spaces, parentheses, accents --
+ * while refusing anything that escapes the part's own directory. Validating by
+ * normalised shape rather than by character class; the builder repeats the check
+ * against the actual build root, so this is defence in depth, not the only gate.
+ */
+function unsafeFilename(name: string): string | null {
+  if (name === "" || name.includes("\0")) return "is empty or contains a NUL byte";
+  if (name.includes("\\")) return "contains a backslash";
+  if (name.startsWith("/")) return "is an absolute path";
+  const normalised = posix.normalize(name);
+  if (normalised === "." || normalised === ".." || normalised.startsWith("../")) {
+    return "points outside the part";
+  }
+  if (name.length > 255) return "is too long";
+  return null;
+}
 
 interface Preflight {
   schema: ScadSchema;
@@ -88,8 +105,9 @@ function readSource(
   }
   const files: Record<string, string> = {};
   for (const [name, content] of entries) {
-    if (!SAFE_FILENAME.test(name) || name.split("/").includes("..")) {
-      reply.code(400).send({ error: `unsafe filename: ${name}` });
+    const problem = unsafeFilename(name);
+    if (problem) {
+      reply.code(400).send({ error: `The filename "${name}" ${problem}.` });
       return null;
     }
     if (typeof content !== "string") {
