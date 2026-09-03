@@ -17,14 +17,13 @@
  *
  *   npx tsx scripts/audit/run.ts [--corpus var/corpus] [--per-repo 12] [--builder http://localhost:8081]
  */
-import { readdir, readFile, mkdir, writeFile, stat } from "node:fs/promises";
-import { join, relative, dirname, resolve } from "node:path";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { classify, parseScad, toArgs, validate, type ScadSchema } from "../../packages/scad-schema/src/index.js";
 import { evaluateReadiness } from "../../services/api/src/readiness.js";
 import type { RepoRecord } from "./fetch-corpus.js";
+import { filesFor, MAX_FILE_BYTES, searchPathsFor, walkRepo } from "./shared.js";
 
-const MAX_FILE_BYTES = 400_000;
-const MAX_PAYLOAD_BYTES = 18_000_000;
 const BUILD_TIMEOUT_MS = 25_000;
 const CONCURRENCY = 2;
 
@@ -67,60 +66,6 @@ interface FileResult {
   truncatedPayload: boolean;
 }
 
-async function walk(dir: string, base = dir, out: string[] = []): Promise<string[]> {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    if (e.name === ".git" || e.name === "node_modules") continue;
-    const full = join(dir, e.name);
-    if (e.isDirectory()) await walk(full, base, out);
-    else if (e.isFile() && e.name.toLowerCase().endsWith(".scad")) out.push(relative(base, full));
-  }
-  return out;
-}
-
-/**
- * Choose which sibling files to ship with the entry, nearest first.
- * OpenSCAD resolves includes relative to the including file, so files in the
- * same directory and its ancestors are the ones most likely to be needed.
- */
-function selectFiles(
-  all: { path: string; size: number }[],
-  entry: string,
-  budget: number,
-): { paths: string[]; truncated: boolean } {
-  const entryDir = dirname(entry);
-  const distance = (p: string) => {
-    const d = dirname(p);
-    if (d === entryDir) return 0;
-    if (entryDir.startsWith(d)) return 1 + (entryDir.split("/").length - d.split("/").length);
-    if (d.startsWith(entryDir)) return 1 + (d.split("/").length - entryDir.split("/").length);
-    return 50 + d.split("/").length;
-  };
-
-  const sorted = [...all].sort((a, b) => distance(a.path) - distance(b.path) || a.path.localeCompare(b.path));
-  const paths: string[] = [];
-  let used = 0;
-  let truncated = false;
-  for (const f of sorted) {
-    if (f.size > MAX_FILE_BYTES) {
-      truncated = true;
-      continue;
-    }
-    if (used + f.size > budget) {
-      truncated = true;
-      continue;
-    }
-    paths.push(f.path);
-    used += f.size;
-  }
-  return { paths, truncated };
-}
-
 interface BuilderResponse {
   ok: boolean;
   summary: string;
@@ -135,12 +80,13 @@ async function build(
   entry: string,
   files: Record<string, string>,
   args: string[],
+  searchPaths: string[],
 ): Promise<BuilderResponse> {
   for (let attempt = 0; attempt < 4; attempt++) {
     const res = await fetch(`${BUILDER}/build`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source, entry, files, args, timeoutMs: BUILD_TIMEOUT_MS }),
+      body: JSON.stringify({ source, entry, files, args, searchPaths, timeoutMs: BUILD_TIMEOUT_MS }),
     });
     if (res.status === 503) {
       await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
@@ -168,7 +114,7 @@ function categorize(build: BuilderResponse): Outcome {
   const text = [build.summary, ...build.diagnostics.map((d) => d.raw)].join(" | ");
   if (/above the .* limit/i.test(text)) return "too-large";
   if (/Parser error|syntax error/i.test(text)) return "syntax-error";
-  if (/Can'?t open input file|Unable to open/i.test(text)) return "missing-include";
+  if (/Can'?t open (?:input|include) file|Can'?t open library|Unable to open|included file could not be found/i.test(text)) return "missing-include";
   if (/Assertion .* failed|assert/i.test(text)) return "assertion";
   if (/top level object is empty|no top level geometry|empty model/i.test(text)) return "no-geometry";
   if ((build.metrics?.triangleCount ?? 0) === 0 && build.metrics !== null) return "no-geometry";
@@ -217,22 +163,14 @@ async function main() {
     source: string;
     files: Record<string, string>;
     truncated: boolean;
+    searchPaths: string[];
   }[] = [];
 
   for (const repo of repos) {
-    const paths = await walk(repo.dir);
-    if (paths.length === 0) {
+    const sized = await walkRepo(repo.dir);
+    if (sized.length === 0) {
       perRepo.push({ repo: repo.fullName, scad: 0, libraries: 0, candidates: 0, sampled: 0 });
       continue;
-    }
-
-    const sized: { path: string; size: number }[] = [];
-    for (const p of paths) {
-      try {
-        sized.push({ path: p, size: (await stat(join(repo.dir, p))).size });
-      } catch {
-        /* vanished */
-      }
     }
 
     const candidates: string[] = [];
@@ -264,20 +202,13 @@ async function main() {
 
     for (const entry of sampled) {
       const source = await readFile(join(repo.dir, entry), "utf8");
-      const { paths: keep, truncated } = selectFiles(
-        sized.filter((f) => f.path !== entry),
+      const { files, truncated } = await filesFor(
+        repo.dir,
+        sized,
         entry,
-        MAX_PAYLOAD_BYTES - Buffer.byteLength(source, "utf8"),
+        Buffer.byteLength(source, "utf8"),
       );
-      const files: Record<string, string> = {};
-      for (const p of keep) {
-        try {
-          files[p] = await readFile(join(repo.dir, p), "utf8");
-        } catch {
-          /* skip */
-        }
-      }
-      jobs.push({ repo, entry, source, files, truncated });
+      jobs.push({ repo, entry, source, files, truncated, searchPaths: searchPathsFor(sized) });
     }
   }
 
@@ -287,7 +218,7 @@ async function main() {
   await pool(jobs, CONCURRENCY, async (job) => {
     const schema = parseScad(job.source);
     const { values } = validate(schema, {});
-    const result = await build(job.source, job.entry, job.files, toArgs(schema, values));
+    const result = await build(job.source, job.entry, job.files, toArgs(schema, values), job.searchPaths);
     const outcome = categorize(result);
     const stats = annotationStats(schema);
     const readiness = evaluateReadiness(schema, {
