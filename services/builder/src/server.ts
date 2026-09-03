@@ -117,6 +117,7 @@ app.post("/build", async (request, reply) => {
       metrics: result.metrics ?? null,
       durationMs: result.durationMs,
       timedOut: result.timedOut,
+      incomplete: result.incomplete ?? null,
       artifacts: {
         stl: result.artifacts.stl ? result.artifacts.stl.toString("base64") : null,
         png: result.artifacts.png ? result.artifacts.png.toString("base64") : null,

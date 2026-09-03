@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
-import { parseDiagnostics, summarize, type Diagnostic } from "./diagnostics.js";
+import { findIncompleteness, parseDiagnostics, summarize, type Diagnostic } from "./diagnostics.js";
 import { measure, parseStl, type MeshMetrics } from "./stl.js";
 
 export interface BuildRequest {
@@ -46,6 +46,12 @@ export interface BuildResult {
   durationMs: number;
   /** True when the build was killed for exceeding its time budget. */
   timedOut: boolean;
+  /**
+   * Set when OpenSCAD rendered *some* geometry but silently skipped part of the
+   * model. Such a build is reported as a failure: publishing a half-model with a
+   * healthy dimension report is exactly the quiet wrongness this exists to stop.
+   */
+  incomplete?: string[];
 }
 
 export interface RunnerOptions {
@@ -293,6 +299,22 @@ export async function build(request: BuildRequest, options: RunnerOptions = {}):
         artifacts,
         durationMs: Date.now() - started,
         timedOut: false,
+      };
+    }
+
+    const incomplete = findIncompleteness(diagnostics);
+    if (incomplete.length > 0) {
+      return {
+        ok: false,
+        summary:
+          `The build ran but produced an incomplete model: ${incomplete[0]}. ` +
+          "Publish the missing file alongside the part, or add its directory to the part's search paths.",
+        diagnostics,
+        ...(metrics ? { metrics } : {}),
+        artifacts,
+        durationMs: Date.now() - started,
+        timedOut: false,
+        incomplete,
       };
     }
 

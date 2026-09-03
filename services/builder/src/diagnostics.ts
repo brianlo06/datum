@@ -112,6 +112,48 @@ export function parseDiagnostics(stderr: string): Diagnostic[] {
   return out;
 }
 
+/**
+ * Warnings that mean geometry was silently dropped.
+ *
+ * OpenSCAD downgrades a missing include to a warning and carries on, rendering
+ * whatever it still understands. The result is a build that exits zero, produces
+ * a watertight solid, and is materially the wrong part -- in testing, a model
+ * that should have been 30mm long came out 10mm and reported itself healthy.
+ *
+ * A registry whose whole claim is "the build is the quality gate" cannot publish
+ * that. These are treated as build failures, not warnings.
+ */
+const INCOMPLETENESS: { match: RegExp; describe: (m: RegExpExecArray) => string }[] = [
+  {
+    // The filename is taken from the rule's own capture group; a looser search
+    // for a quoted string would match the apostrophe in "Can't".
+    match: /Can'?t open (?:input |include )?file '([^']+)'|Can'?t open library '([^']+)'/i,
+    describe: (m) => `the included file "${m[1] ?? m[2]}" could not be found`,
+  },
+  {
+    match: /Ignoring unknown module '([^']+)'/i,
+    describe: (m) =>
+      `the module "${m[1]}" does not exist, so everything it would have drawn is missing`,
+  },
+];
+
+/**
+ * Reasons this build produced less geometry than the source asked for.
+ * Empty means the output can be trusted to be the whole part.
+ */
+export function findIncompleteness(diagnostics: Diagnostic[]): string[] {
+  const reasons: string[] = [];
+  for (const d of diagnostics) {
+    for (const rule of INCOMPLETENESS) {
+      const m = rule.match.exec(d.raw);
+      if (!m) continue;
+      const reason = rule.describe(m);
+      if (!reasons.includes(reason)) reasons.push(reason);
+    }
+  }
+  return reasons;
+}
+
 /** The single sentence to show when a build fails. */
 export function summarize(diagnostics: Diagnostic[], fallback: string): string {
   const firstError = diagnostics.find((d) => d.level === "error");

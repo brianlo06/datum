@@ -24,7 +24,7 @@ import { evaluateReadiness } from "../../services/api/src/readiness.js";
 import type { RepoRecord } from "./fetch-corpus.js";
 import { filesFor, MAX_FILE_BYTES, searchPathsFor, walkRepo } from "./shared.js";
 
-const BUILD_TIMEOUT_MS = 25_000;
+
 const CONCURRENCY = 2;
 
 function arg(name: string, fallback: string): string {
@@ -35,6 +35,8 @@ function arg(name: string, fallback: string): string {
 const CORPUS = resolve(arg("corpus", "var/corpus"));
 const BUILDER = arg("builder", "http://localhost:8081");
 const PER_REPO = Number(arg("per-repo", "12"));
+/** Publish-time builds can afford far more than an interactive configure. */
+const BUILD_TIMEOUT_MS = Number(arg("timeout", "25000"));
 
 export type Outcome =
   | "built"

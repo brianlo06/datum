@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDiagnostics, summarize } from "./diagnostics.js";
+import { findIncompleteness, parseDiagnostics, summarize } from "./diagnostics.js";
 
 describe("parseDiagnostics", () => {
   it("extracts level, message and location", () => {
@@ -87,5 +87,62 @@ describe("summarize", () => {
 
   it("falls back when nothing is recognised", () => {
     expect(summarize([], "OpenSCAD exited with status 1")).toBe("OpenSCAD exited with status 1");
+  });
+});
+
+describe("findIncompleteness", () => {
+  it("flags a missing include, which silently drops whatever it defined", () => {
+    const reasons = findIncompleteness(
+      parseDiagnostics("WARNING: Can't open include file 'shapes.scad'."),
+    );
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('"shapes.scad"');
+    expect(reasons[0]).toContain("could not be found");
+  });
+
+  it("flags an unknown module, which drops everything it would have drawn", () => {
+    const reasons = findIncompleteness(
+      parseDiagnostics("WARNING: Ignoring unknown module 'blk' in file demo.scad, line 3"),
+    );
+    expect(reasons[0]).toContain('"blk"');
+    expect(reasons[0]).toContain("missing");
+  });
+
+  it("covers each phrasing OpenSCAD uses for an unopenable file", () => {
+    for (const raw of [
+      "WARNING: Can't open input file 'a.scad'.",
+      "WARNING: Can't open include file 'a.scad'.",
+      "WARNING: Can't open library 'a.scad'.",
+    ]) {
+      expect(findIncompleteness(parseDiagnostics(raw))).toHaveLength(1);
+    }
+  });
+
+  it("does not flag an unknown variable, which changes values rather than dropping geometry", () => {
+    expect(
+      findIncompleteness(parseDiagnostics("WARNING: Ignoring unknown variable 'wdith'")),
+    ).toEqual([]);
+  });
+
+  it("does not flag a manifold warning, which is a quality signal not an omission", () => {
+    expect(
+      findIncompleteness(parseDiagnostics("WARNING: Object may not be a valid 2-manifold")),
+    ).toEqual([]);
+  });
+
+  it("reports a clean build as complete", () => {
+    expect(findIncompleteness(parseDiagnostics(""))).toEqual([]);
+  });
+
+  it("de-duplicates the same missing file reported many times", () => {
+    const reasons = findIncompleteness(
+      parseDiagnostics(
+        [
+          "WARNING: Can't open include file 'shapes.scad'.",
+          "WARNING: Can't open include file 'shapes.scad'.",
+        ].join("\n"),
+      ),
+    );
+    expect(reasons).toHaveLength(1);
   });
 });

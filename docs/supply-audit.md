@@ -130,6 +130,37 @@ refuses them. The gate is doing real work rather than waving everything through.
    good configurator. Seeding fills the shelves; it does not produce a compelling front page. The
    concierge and interview work from the validation plan still has to happen.
 
+## Follow-up: library resolution, and a defect it exposed
+
+Acting on finding 1 (resolve library dependencies) produced a result worth recording, because the
+naive reading of it is wrong.
+
+Two mechanisms were added: search paths derived from the part's own files, and a small vendored
+library set (BOSL2, Round-Anything, MCAD) pinned to immutable commits. Re-running the audit, the
+measured build rate **fell from 70% to 50%**, and timeouts rose from 14 to 67.
+
+That looks like a regression. It is not. Isolating the mechanism on a synthetic part:
+
+| | `ok` | triangles | bounding box |
+|---|---|---:|---|
+| include unresolved | **true** | 12 | 10 × 10 × 10 |
+| include resolved | true | 24 | **30 × 10 × 10** |
+
+**A missing include does not fail the build.** OpenSCAD downgrades it to a warning, renders whatever
+it still understands, and exits zero — producing a watertight solid that is materially the wrong
+part. The original 70% therefore included an unknown number of silently incomplete builds that had
+been scored as successes. Resolving includes makes those parts render in full, which is both more
+correct and far more expensive, and the cost lands on a 25-second timeout.
+
+So the honest conclusion is not "library resolution made things worse". It is:
+
+1. **The earlier 70% was optimistic**, because a partial model counted as a success.
+2. **Compute time, not include resolution, is now the binding constraint.**
+3. **The publish gate had a real defect.** A build that silently drops geometry is now reported as a
+   failure with a specific reason — the missing file or the unknown module is named — rather than
+   published with a healthy-looking dimension report. This is the single most valuable thing the
+   audit produced, and it would never have surfaced from source written in-house.
+
 ## Limitations
 
 - One kernel version (OpenSCAD 2021.01, Debian bookworm). A newer release would build more.
