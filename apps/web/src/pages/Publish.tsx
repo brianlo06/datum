@@ -391,6 +391,9 @@ function BuildReport({
         <ChecksList readiness={readiness} />
         {preflight.suggestions.length > 0 && (
           <SuggestionPanel
+            // Remount when the proposal set changes, so the checkbox selection
+            // cannot outlive the suggestions it referred to.
+            key={preflight.suggestions.map((s) => s.param).join(",")}
             suggestions={preflight.suggestions}
             onApply={onAnnotate}
             busy={annotating}
