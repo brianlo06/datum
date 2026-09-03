@@ -10,7 +10,7 @@ import {
   type ScadSchema,
 } from "@datum/scad-schema";
 import { get as getArtifact, put as putArtifact } from "./artifacts.js";
-import { builderHealth, BuilderBusy, BuilderUnavailable, runBuild } from "./builder.js";
+import { builderHealth, BuilderBusy, BuilderUnavailable, environmentDigest, runBuild } from "./builder.js";
 import { migrate, pool } from "./db.js";
 import { publishRoutes } from "./publish.js";
 
@@ -146,7 +146,7 @@ app.post<{ Params: { owner: string; slug: string }; Body: { params?: Record<stri
     const configured = v.schema.params.some(
       (p) => JSON.stringify(result.values[p.name]) !== JSON.stringify(p.default),
     );
-    const hash = computeBuildHash(v.source_hash, result.values);
+    const hash = computeBuildHash(v.source_hash, result.values, await environmentDigest());
 
     const cached = await pool.query(
       `SELECT build_hash, ok, summary, diagnostics, metrics, duration_ms, stl_path, png_path

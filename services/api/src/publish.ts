@@ -11,7 +11,7 @@ import {
 } from "@datum/scad-schema";
 import { put as putArtifact } from "./artifacts.js";
 import { AuthError, createAuthor, isHandle, requireAuthor } from "./auth.js";
-import { BuilderBusy, BuilderUnavailable, runBuild, type BuilderResponse } from "./builder.js";
+import { builderHealth, BuilderBusy, BuilderUnavailable, environmentDigest, runBuild, type BuilderResponse } from "./builder.js";
 import { pool, withTransaction } from "./db.js";
 import { isLicense, LICENSES } from "./licenses.js";
 import { evaluateReadiness, type Readiness } from "./readiness.js";
@@ -178,7 +178,7 @@ async function recordBuild(
   build: BuilderResponse,
 ): Promise<string> {
   const { values } = validate(schema, {});
-  const hash = computeBuildHash(sourceHash, values);
+  const hash = computeBuildHash(sourceHash, values, await environmentDigest());
 
   let stlPath: string | null = null;
   let pngPath: string | null = null;
@@ -249,6 +249,19 @@ export const publishRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/api/licenses", async () => ({ licenses: LICENSES }));
+
+  /**
+   * The libraries a part may `include <>` without publishing them itself.
+   * Authors have no way to guess this, so the publish page shows it up front
+   * rather than letting them discover it through a failed build.
+   */
+  app.get("/api/libraries", async () => {
+    const health = await builderHealth();
+    return {
+      libraries: Array.isArray(health.libraries) ? health.libraries : [],
+      digest: typeof health.libraryDigest === "string" ? health.libraryDigest : null,
+    };
+  });
 
   app.post<{ Body: { handle?: unknown; displayName?: unknown } }>(
     "/api/authors",

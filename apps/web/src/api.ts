@@ -6,6 +6,7 @@ import type {
   PartSummary,
   Preflight,
   ProposeResult,
+  VendoredLibrary,
   PublishedPart,
   ParamValue,
 } from "./types";
@@ -102,6 +103,8 @@ export const api = {
     }),
   licenses: () => request<{ licenses: License[] }>("/api/licenses"),
   interfaces: () => request<{ interfaces: Interface[] }>("/api/interfaces"),
+  libraries: () =>
+    request<{ libraries: VendoredLibrary[]; digest: string | null }>("/api/libraries"),
   preflight: (source: string, files?: Record<string, string>) =>
     request<Preflight>("/api/publish/preflight", {
       method: "POST",

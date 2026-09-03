@@ -167,3 +167,10 @@ export interface InterfaceClaim {
   slug: string;
   role: "implements" | "consumes";
 }
+
+export interface VendoredLibrary {
+  name: string;
+  version: string;
+  license: string;
+  include: string;
+}

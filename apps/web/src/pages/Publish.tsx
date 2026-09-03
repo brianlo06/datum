@@ -8,6 +8,7 @@ import type {
   Preflight,
   Readiness,
   ReadinessCheck,
+  VendoredLibrary,
 } from "../types";
 
 const EXAMPLE = `// A parametric spacer
@@ -56,6 +57,7 @@ export function Publish() {
 
   const [licenses, setLicenses] = useState<License[]>([]);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
+  const [libraries, setLibraries] = useState<VendoredLibrary[]>([]);
   const [me, setMe] = useState(() => identity.get());
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
@@ -63,6 +65,7 @@ export function Publish() {
   useEffect(() => {
     api.licenses().then((r) => setLicenses(r.licenses)).catch(() => setLicenses([]));
     api.interfaces().then((r) => setInterfaces(r.interfaces)).catch(() => setInterfaces([]));
+    api.libraries().then((r) => setLibraries(r.libraries)).catch(() => setLibraries([]));
   }, []);
 
   const stale = preflight !== null && checkedSource !== source;
@@ -149,6 +152,21 @@ export function Publish() {
           onChange={(e) => setSource(e.target.value)}
           rows={16}
         />
+        {libraries.length > 0 && (
+          <p className="libs-note">
+            Builds are isolated. <code>include &lt;&gt;</code> resolves against files you publish
+            with the part, plus{" "}
+            {libraries.map((l, i) => (
+              <span key={l.name}>
+                {i > 0 && (i === libraries.length - 1 ? " and " : ", ")}
+                <code title={`${l.include} — ${l.license}`}>
+                  {l.name} {l.version}
+                </code>
+              </span>
+            ))}
+            .
+          </p>
+        )}
         <div className="step-foot">
           <button
             type="button"

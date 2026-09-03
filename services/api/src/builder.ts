@@ -47,10 +47,36 @@ export async function runBuild(request: BuildRequest): Promise<BuilderResponse> 
   return (await res.json()) as BuilderResponse;
 }
 
-export async function builderHealth(): Promise<unknown> {
+export async function builderHealth(): Promise<Record<string, unknown>> {
   try {
-    return await (await fetch(`${BUILDER_URL}/health`)).json();
+    return (await (await fetch(`${BUILDER_URL}/health`)).json()) as Record<string, unknown>;
   } catch {
     return { ok: false, error: "unreachable" };
   }
+}
+
+/**
+ * A digest identifying the build environment, folded into every build hash.
+ *
+ * Geometry depends on the sandbox's vendored library set as well as on the
+ * source and parameters, so the cache key has to include it -- otherwise
+ * bumping BOSL2 would leave every affected part serving stale geometry from a
+ * content address that no longer describes it.
+ *
+ * Memoised with a short TTL. If the builder is unreachable we deliberately fall
+ * back to the empty digest rather than inventing one: that reproduces the
+ * pre-library hash, which is wrong-but-stable, instead of scattering
+ * uncacheable one-off hashes across the table.
+ */
+let cachedDigest: { value: string; at: number } | null = null;
+const DIGEST_TTL_MS = 60_000;
+
+export async function environmentDigest(): Promise<string> {
+  const now = Date.now();
+  if (cachedDigest && now - cachedDigest.at < DIGEST_TTL_MS) return cachedDigest.value;
+
+  const health = await builderHealth();
+  const digest = typeof health.libraryDigest === "string" ? health.libraryDigest : "";
+  if (digest !== "") cachedDigest = { value: digest, at: now };
+  return digest;
 }
