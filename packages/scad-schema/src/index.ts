@@ -4,4 +4,6 @@ export { serializeValue, toArgs, validate, buildHash, hashSource } from "./value
 export { classify } from "./classify.js";
 export type { Classification } from "./classify.js";
 export { diffSchemas } from "./diff.js";
+export { suggestAnnotations, applySuggestions } from "./suggest.js";
+export type { Suggestion } from "./suggest.js";
 export type { SchemaDiff, ParamChange, ChangeKind, Severity } from "./diff.js";

@@ -110,6 +110,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ source, ...(files ? { files } : {}) }),
     }),
+  annotate: (source: string, params: string[]) =>
+    request<{ source: string; applied: string[]; skipped: string[] }>("/api/publish/annotate", {
+      method: "POST",
+      body: JSON.stringify({ source, params }),
+    }),
   claimHandle: (handle: string, displayName: string) =>
     request<{ handle: string; token: string; notice: string }>("/api/authors", {
       method: "POST",

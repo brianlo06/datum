@@ -1,13 +1,16 @@
 import { posix } from "node:path";
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import {
+  applySuggestions,
   buildHash as computeBuildHash,
   diffSchemas,
   hashSource,
   parseScad,
+  suggestAnnotations,
   toArgs,
   validate,
   type ScadSchema,
+  type Suggestion,
 } from "@datum/scad-schema";
 import { put as putArtifact } from "./artifacts.js";
 import { AuthError, createAuthor, isHandle, requireAuthor } from "./auth.js";
@@ -43,6 +46,8 @@ interface Preflight {
   sourceHash: string;
   build: BuilderResponse;
   readiness: Readiness;
+  /** Proposed annotations for parameters the author left bare. */
+  suggestions: Suggestion[];
 }
 
 /**
@@ -66,7 +71,13 @@ async function preflight(source: string, files?: Record<string, string>): Promis
     summary: build.summary,
     metrics: build.metrics,
   });
-  return { schema, sourceHash: hashSource(source), build, readiness };
+  return {
+    schema,
+    sourceHash: hashSource(source),
+    build,
+    readiness,
+    suggestions: suggestAnnotations(schema),
+  };
 }
 
 function geometryOf(build: BuilderResponse): GeometrySummary | null {
@@ -296,6 +307,38 @@ export const publishRoutes: FastifyPluginAsync = async (app) => {
         sourceHash: result.sourceHash,
         build: publicBuild(result.build),
         readiness: result.readiness,
+        suggestions: result.suggestions,
+      });
+    },
+  );
+
+  /**
+   * Write accepted annotation suggestions back into the source.
+   *
+   * Only the named parameters are touched, and only lines that still look like
+   * their assignment and carry no comment of their own -- the author's file comes
+   * back with their formatting intact plus the ranges they agreed to.
+   */
+  app.post<{ Body: { source?: unknown; params?: unknown; files?: unknown } }>(
+    "/api/publish/annotate",
+    async (request, reply) => {
+      const input = readSource(request.body ?? {}, reply);
+      if (!input) return reply;
+
+      const accepted = request.body?.params;
+      if (!Array.isArray(accepted) || !accepted.every((p) => typeof p === "string")) {
+        return reply.code(400).send({ error: "params must be an array of parameter names" });
+      }
+
+      const schema = parseScad(input.source);
+      const wanted = new Set(accepted as string[]);
+      const suggestions = suggestAnnotations(schema).filter((s) => wanted.has(s.param));
+      const result = applySuggestions(input.source, schema, suggestions);
+
+      return reply.send({
+        source: result.source,
+        applied: result.applied,
+        skipped: [...result.skipped, ...accepted.filter((p) => !suggestions.some((s) => s.param === p))],
       });
     },
   );

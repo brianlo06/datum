@@ -8,6 +8,7 @@ import type {
   Preflight,
   Readiness,
   ReadinessCheck,
+  Suggestion,
   VendoredLibrary,
 } from "../types";
 
@@ -61,6 +62,31 @@ export function Publish() {
   const [me, setMe] = useState(() => identity.get());
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [annotating, setAnnotating] = useState(false);
+
+  /**
+   * Rewrite the source with the accepted ranges, then immediately re-check.
+   * The author sees their own file come back with annotations added, which is
+   * both the point and the proof that nothing else was touched.
+   */
+  const annotate = useCallback(
+    async (params: string[]) => {
+      if (params.length === 0) return;
+      setAnnotating(true);
+      try {
+        const result = await api.annotate(source, params);
+        setSource(result.source);
+        const checked = await api.preflight(result.source);
+        setPreflight(checked);
+        setCheckedSource(result.source);
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Could not apply the ranges.");
+      } finally {
+        setAnnotating(false);
+      }
+    },
+    [source],
+  );
 
   useEffect(() => {
     api.licenses().then((r) => setLicenses(r.licenses)).catch(() => setLicenses([]));
@@ -191,7 +217,7 @@ export function Publish() {
               {preflight.readiness.ready ? "Ready to publish" : "Not ready"}
             </span>
           </div>
-          <BuildReport preflight={preflight} />
+          <BuildReport preflight={preflight} onAnnotate={annotate} annotating={annotating} />
         </section>
       )}
 
@@ -319,7 +345,15 @@ function FilePicker({ onFile }: { onFile: (file: File) => void }) {
   );
 }
 
-function BuildReport({ preflight }: { preflight: Preflight }) {
+function BuildReport({
+  preflight,
+  onAnnotate,
+  annotating,
+}: {
+  preflight: Preflight;
+  onAnnotate: (params: string[]) => void;
+  annotating: boolean;
+}) {
   const { readiness, build, schema } = preflight;
   const preview = useMemo(
     () => (build.previewBase64 ? `data:image/png;base64,${build.previewBase64}` : null),
@@ -355,6 +389,13 @@ function BuildReport({ preflight }: { preflight: Preflight }) {
 
       <div className="report-checks">
         <ChecksList readiness={readiness} />
+        {preflight.suggestions.length > 0 && (
+          <SuggestionPanel
+            suggestions={preflight.suggestions}
+            onApply={onAnnotate}
+            busy={annotating}
+          />
+        )}
         {visible.length > 0 && (
           <div className="param-preview">
             <h4>Configurator preview</h4>
@@ -382,6 +423,70 @@ function BuildReport({ preflight }: { preflight: Preflight }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Most real parametric source has no ranges at all -- only 2% of parameters in
+ * the supply audit carried one -- so a bare number box per parameter is the
+ * default outcome. This offers the author a real configurator for the cost of
+ * one click, and shows exactly what it will write into their file.
+ */
+function SuggestionPanel({
+  suggestions,
+  onApply,
+  busy,
+}: {
+  suggestions: Suggestion[];
+  onApply: (params: string[]) => void;
+  busy: boolean;
+}) {
+  const [chosen, setChosen] = useState<Set<string>>(
+    () => new Set(suggestions.filter((s) => s.confidence === "high").map((s) => s.param)),
+  );
+
+  const toggle = (name: string) =>
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  return (
+    <div className="suggest">
+      <h4>Give these a range?</h4>
+      <p className="muted small">
+        {suggestions.length} parameter{suggestions.length === 1 ? "" : "s"} would render as a bare
+        number box. These proposals become sliders. They are written into your source as ordinary
+        Customizer comments, so they work in OpenSCAD too — review them before accepting.
+      </p>
+      <ul className="suggest-list">
+        {suggestions.map((s) => (
+          <li key={s.param}>
+            <label>
+              <input
+                type="checkbox"
+                checked={chosen.has(s.param)}
+                onChange={() => toggle(s.param)}
+              />
+              <code className="suggest-name">{s.param}</code>
+              <code className="suggest-annotation">{s.annotation}</code>
+              <span className={`suggest-confidence ${s.confidence}`}>{s.confidence}</span>
+            </label>
+            <p className="suggest-why">{s.rationale}</p>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        className="ghost"
+        disabled={busy || chosen.size === 0}
+        onClick={() => onApply([...chosen])}
+      >
+        {busy ? "Applying…" : `Add ${chosen.size} range${chosen.size === 1 ? "" : "s"} to my source`}
+      </button>
     </div>
   );
 }

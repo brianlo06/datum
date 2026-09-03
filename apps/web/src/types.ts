@@ -131,11 +131,20 @@ export interface PreflightBuild {
   previewBase64: string | null;
 }
 
+export interface Suggestion {
+  param: string;
+  widget: Widget;
+  rationale: string;
+  confidence: "high" | "medium" | "low";
+  annotation: string;
+}
+
 export interface Preflight {
   schema: ScadSchema;
   sourceHash: string;
   build: PreflightBuild;
   readiness: Readiness;
+  suggestions: Suggestion[];
 }
 
 export interface PublishedPart {

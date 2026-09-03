@@ -338,3 +338,26 @@ textarea { font-family: inherit; background: var(--surface-2); border: 1px solid
   color: var(--accent); font-size: 11.5px;
   border: 1px solid var(--rule-strong); border-radius: 3px; padding: 1px 5px;
 }
+
+/* ---------- annotation suggestions ---------- */
+.suggest {
+  margin-top: 20px; border-top: 1px solid var(--rule); padding-top: 16px;
+}
+.suggest h4 {
+  margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--accent); font-weight: 600;
+}
+.suggest-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 9px; }
+.suggest-list label {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap; cursor: pointer;
+}
+.suggest-list input { accent-color: var(--accent); }
+.suggest-name { font-size: 12.5px; color: var(--ink); min-width: 96px; }
+.suggest-annotation { font-size: 11.5px; color: var(--accent); }
+.suggest-confidence {
+  font-family: ui-monospace, monospace; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--rule-strong);
+  color: var(--muted);
+}
+.suggest-confidence.high { color: var(--accent); border-color: var(--accent-dim); }
+.suggest-why { margin: 2px 0 0 26px; font-size: 11.5px; color: var(--muted); }
